@@ -144,13 +144,31 @@ export const InputStep: React.FC<InputStepProps> = ({
                 />
               </div>
 
-              {/* Job Requirements & Key Roles */}
+              {/* Job Description */}
+              <div>
+                <label
+                  htmlFor="job-description-input"
+                  className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider"
+                >
+                  Job Description
+                </label>
+                <textarea
+                  id="job-description-input"
+                  rows={4}
+                  placeholder="Paste the role summary, day-to-day context, team details..."
+                  value={job.jobDescription}
+                  onChange={(e) => setJob({ ...job, jobDescription: e.target.value })}
+                  className="w-full bg-slate-50/70 border border-slate-200 focus:bg-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 rounded-xl p-3.5 text-sm text-slate-900 placeholder-slate-400 transition outline-none resize-y"
+                />
+              </div>
+
+              {/* Job Requirements */}
               <div>
                 <label
                   htmlFor="job-requirements-input"
                   className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider flex items-center justify-between"
                 >
-                  <span>Job Requirements (Key Roles & Responsibilities)</span>
+                  <span>Job Requirements</span>
                   <span className="text-[11px] text-blue-600 font-semibold lowercase">crucial for ats</span>
                 </label>
                 <textarea
@@ -159,24 +177,6 @@ export const InputStep: React.FC<InputStepProps> = ({
                   placeholder="Paste required skills, years of experience, responsibilities, technical requirements..."
                   value={job.jobRequirements}
                   onChange={(e) => setJob({ ...job, jobRequirements: e.target.value })}
-                  className="w-full bg-slate-50/70 border border-slate-200 focus:bg-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 rounded-xl p-3.5 text-sm text-slate-900 placeholder-slate-400 transition outline-none resize-y"
-                />
-              </div>
-
-              {/* Job Description (General Overview) */}
-              <div>
-                <label
-                  htmlFor="job-description-input"
-                  className="block text-xs font-bold text-slate-400 mb-1.5 uppercase tracking-wider"
-                >
-                  Job Description / Company Overview
-                </label>
-                <textarea
-                  id="job-description-input"
-                  rows={4}
-                  placeholder="Paste the company overview, role summary, day-to-day context..."
-                  value={job.jobDescription}
-                  onChange={(e) => setJob({ ...job, jobDescription: e.target.value })}
                   className="w-full bg-slate-50/70 border border-slate-200 focus:bg-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 rounded-xl p-3.5 text-sm text-slate-900 placeholder-slate-400 transition outline-none resize-y"
                 />
               </div>
