@@ -21,6 +21,90 @@ function getGenAI() {
   });
 }
 
+function cleanAndParseJson(raw: string) {
+  let cleaned = (raw || "").trim();
+  if (cleaned.startsWith("```json")) {
+    cleaned = cleaned.replace(/^```json\s*/i, "").replace(/\s*```$/, "");
+  } else if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```\s*/, "").replace(/\s*```$/, "");
+  }
+  return JSON.parse(cleaned);
+}
+
+function formatErrorMessage(err: any): string {
+  const msg = err?.message || String(err || "");
+  if (
+    msg.includes("503") ||
+    msg.includes("UNAVAILABLE") ||
+    msg.includes("high demand")
+  ) {
+    return "The AI engine is temporarily experiencing high traffic spikes. Please wait a moment and click Retry.";
+  }
+  if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
+    return "The AI rate limit was reached temporarily. Please wait a few seconds and try again.";
+  }
+  return msg;
+}
+
+/**
+ * Execute Gemini generateContent with automatic retry on 503/transient errors
+ * and fallback across supported models.
+ */
+async function generateContentWithRetryAndFallback(
+  ai: GoogleGenAI,
+  params: {
+    contents: string;
+    config?: any;
+  }
+) {
+  const modelsToTry = [
+    "gemini-3.7-flash",
+    "gemini-flash-latest",
+    "gemini-3.1-flash-lite",
+  ];
+
+  let lastError: any = null;
+
+  for (const model of modelsToTry) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: params.contents,
+          config: params.config,
+        });
+        if (response && response.text) {
+          return response;
+        }
+      } catch (err: any) {
+        lastError = err;
+        const errMsg = err?.message || String(err);
+        console.warn(
+          `[Gemini API] Error on model ${model} (attempt ${attempt}/2): ${errMsg}`
+        );
+
+        const isTransient =
+          errMsg.includes("503") ||
+          errMsg.includes("UNAVAILABLE") ||
+          errMsg.includes("high demand") ||
+          errMsg.includes("429") ||
+          errMsg.includes("RESOURCE_EXHAUSTED") ||
+          errMsg.includes("ECONNRESET") ||
+          errMsg.includes("ETIMEDOUT");
+
+        if (isTransient) {
+          await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+        } else {
+          // If non-transient, try next model immediately
+          break;
+        }
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -36,10 +120,21 @@ async function startServer() {
   // Step 1 to 4 Analysis Endpoint: Analyze Job & Candidate Resume
   app.post("/api/analyze-job-and-resume", async (req, res) => {
     try {
-      const { jobTitle, jobDescription, jobRequirements, careerSummary, coreCompetencies, handsOnProjects, professionalExperience, fullRawResume } = req.body;
+      const {
+        jobTitle,
+        jobDescription,
+        jobRequirements,
+        careerSummary,
+        coreCompetencies,
+        handsOnProjects,
+        professionalExperience,
+        fullRawResume,
+      } = req.body;
 
       if (!jobTitle && !jobDescription && !jobRequirements) {
-        return res.status(400).json({ error: "Job posting details (Title, Description, or Requirements) are required." });
+        return res.status(400).json({
+          error: "Job posting details (Title, Description, or Requirements) are required.",
+        });
       }
 
       const ai = getGenAI();
@@ -78,8 +173,7 @@ ${fullRawResume ? `Full Raw Resume Text:\n${fullRawResume}` : ""}
 
 Return valid JSON adhering strictly to the requested schema.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
+      const response = await generateContentWithRetryAndFallback(ai, {
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -92,7 +186,8 @@ Return valid JSON adhering strictly to the requested schema.`;
                   atsKeywords: {
                     type: Type.ARRAY,
                     items: { type: Type.STRING },
-                    description: "High-priority ATS keywords extracted from the job posting (technologies, methodologies, industry jargon, titles).",
+                    description:
+                      "High-priority ATS keywords extracted from the job posting (technologies, methodologies, industry jargon, titles).",
                   },
                   mustHaveSkills: {
                     type: Type.ARRAY,
@@ -107,32 +202,44 @@ Return valid JSON adhering strictly to the requested schema.`;
                   technicalTools: {
                     type: Type.ARRAY,
                     items: { type: Type.STRING },
-                    description: "Specific tools, platforms, languages, or software mentioned.",
+                    description:
+                      "Specific tools, platforms, languages, or software mentioned.",
                   },
                   softSkills: {
                     type: Type.ARRAY,
                     items: { type: Type.STRING },
-                    description: "Leadership, communication, collaboration, and interpersonal traits required.",
+                    description:
+                      "Leadership, communication, collaboration, and interpersonal traits required.",
                   },
                   experienceRequirements: {
                     type: Type.ARRAY,
                     items: { type: Type.STRING },
-                    description: "Years of experience or specific domain scope requirements.",
+                    description:
+                      "Years of experience or specific domain scope requirements.",
                   },
                   roleSummary: {
                     type: Type.STRING,
-                    description: "A 2-3 sentence executive summary of what this role specifically demands and what the hiring committee values most.",
+                    description:
+                      "A 2-3 sentence executive summary of what this role specifically demands and what the hiring committee values most.",
                   },
                 },
-                required: ["atsKeywords", "mustHaveSkills", "technicalTools", "experienceRequirements", "roleSummary"],
+                required: [
+                  "atsKeywords",
+                  "mustHaveSkills",
+                  "technicalTools",
+                  "experienceRequirements",
+                  "roleSummary",
+                ],
               },
               initialRating: {
                 type: Type.INTEGER,
-                description: "Initial percentage score from 0 to 100 representing how well the current resume matches the job posting ATS and hiring requirements.",
+                description:
+                  "Initial percentage score from 0 to 100 representing how well the current resume matches the job posting ATS and hiring requirements.",
               },
               overallSummary: {
                 type: Type.STRING,
-                description: "Constructive feedback from the hiring manager explaining the initial rating and major gaps or strong alignments.",
+                description:
+                  "Constructive feedback from the hiring manager explaining the initial rating and major gaps or strong alignments.",
               },
               matchedKeywords: {
                 type: Type.ARRAY,
@@ -140,13 +247,30 @@ Return valid JSON adhering strictly to the requested schema.`;
                   type: Type.OBJECT,
                   properties: {
                     keyword: { type: Type.STRING },
-                    category: { type: Type.STRING, description: "e.g. Skill, Tool, Experience, Requirement, Soft Skill" },
-                    resumeEvidence: { type: Type.STRING, description: "Exact or closely paraphrased quote/bullet from candidate's resume where this was detected." },
-                    matchStrength: { type: Type.STRING, description: "High, Medium, or Partial" },
+                    category: {
+                      type: Type.STRING,
+                      description:
+                        "e.g. Skill, Tool, Experience, Requirement, Soft Skill",
+                    },
+                    resumeEvidence: {
+                      type: Type.STRING,
+                      description:
+                        "Exact or closely paraphrased quote/bullet from candidate's resume where this was detected.",
+                    },
+                    matchStrength: {
+                      type: Type.STRING,
+                      description: "High, Medium, or Partial",
+                    },
                   },
-                  required: ["keyword", "category", "resumeEvidence", "matchStrength"],
+                  required: [
+                    "keyword",
+                    "category",
+                    "resumeEvidence",
+                    "matchStrength",
+                  ],
                 },
-                description: "List of keywords and requirements found successfully in the resume.",
+                description:
+                  "List of keywords and requirements found successfully in the resume.",
               },
               missingKeywords: {
                 type: Type.ARRAY,
@@ -155,17 +279,51 @@ Return valid JSON adhering strictly to the requested schema.`;
                   properties: {
                     id: { type: Type.STRING },
                     keyword: { type: Type.STRING },
-                    category: { type: Type.STRING, description: "skill, experience, tool, qualification, or domain" },
-                    importance: { type: Type.STRING, description: "critical, high, or medium" },
-                    contextFromJob: { type: Type.STRING, description: "Why the job asks for this" },
-                    suggestedQuestion: { type: Type.STRING, description: "Friendly interview question from hiring manager to ask candidate if they have this unlisted skill/experience." },
-                    allowRanking: { type: Type.BOOLEAN, description: "Whether candidate should rank proficiency (basic, intermediate, advanced)" },
-                    allowYears: { type: Type.BOOLEAN, description: "Whether candidate should specify years of experience" },
-                    askProjectDescription: { type: Type.BOOLEAN, description: "Whether to ask for a brief example or project description" },
+                    category: {
+                      type: Type.STRING,
+                      description:
+                        "skill, experience, tool, qualification, or domain",
+                    },
+                    importance: {
+                      type: Type.STRING,
+                      description: "critical, high, or medium",
+                    },
+                    contextFromJob: {
+                      type: Type.STRING,
+                      description: "Why the job asks for this",
+                    },
+                    suggestedQuestion: {
+                      type: Type.STRING,
+                      description:
+                        "Friendly interview question from hiring manager to ask candidate if they have this unlisted skill/experience.",
+                    },
+                    allowRanking: {
+                      type: Type.BOOLEAN,
+                      description:
+                        "Whether candidate should rank proficiency (basic, intermediate, advanced)",
+                    },
+                    allowYears: {
+                      type: Type.BOOLEAN,
+                      description:
+                        "Whether candidate should specify years of experience",
+                    },
+                    askProjectDescription: {
+                      type: Type.BOOLEAN,
+                      description:
+                        "Whether to ask for a brief example or project description",
+                    },
                   },
-                  required: ["id", "keyword", "category", "importance", "contextFromJob", "suggestedQuestion"],
+                  required: [
+                    "id",
+                    "keyword",
+                    "category",
+                    "importance",
+                    "contextFromJob",
+                    "suggestedQuestion",
+                  ],
                 },
-                description: "Keywords or skills missing from the resume that the candidate should be interviewed about.",
+                description:
+                  "Keywords or skills missing from the resume that the candidate should be interviewed about.",
               },
               parsedResumeSections: {
                 type: Type.OBJECT,
@@ -175,21 +333,27 @@ Return valid JSON adhering strictly to the requested schema.`;
                   handsOnProjects: { type: Type.STRING },
                   professionalExperience: { type: Type.STRING },
                 },
-                description: "Cleanly separated 4 resume sections extracted from inputs.",
+                description:
+                  "Cleanly separated 4 resume sections extracted from inputs.",
               },
             },
-            required: ["jobAnalysis", "initialRating", "overallSummary", "matchedKeywords", "missingKeywords"],
+            required: [
+              "jobAnalysis",
+              "initialRating",
+              "overallSummary",
+              "matchedKeywords",
+              "missingKeywords",
+            ],
           },
         },
       });
 
-      const rawJson = response.text || "{}";
-      const parsedData = JSON.parse(rawJson);
+      const parsedData = cleanAndParseJson(response.text || "{}");
       res.json(parsedData);
     } catch (error: any) {
       console.error("Error in /api/analyze-job-and-resume:", error);
       res.status(500).json({
-        error: error.message || "Failed to analyze job and resume.",
+        error: formatErrorMessage(error),
       });
     }
   });
@@ -207,7 +371,9 @@ Return valid JSON adhering strictly to the requested schema.`;
       } = req.body;
 
       if (!originalSections) {
-        return res.status(400).json({ error: "Original resume sections are required." });
+        return res
+          .status(400)
+          .json({ error: "Original resume sections are required." });
       }
 
       const ai = getGenAI();
@@ -256,8 +422,7 @@ Desired Style / Tone: ${toneStyle || "Results-Driven & ATS Direct"}
 
 Generate the optimized sections and audit report in valid JSON conforming to the schema.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
+      const response = await generateContentWithRetryAndFallback(ai, {
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -266,7 +431,8 @@ Generate the optimized sections and audit report in valid JSON conforming to the
             properties: {
               projectedRating: {
                 type: Type.INTEGER,
-                description: "New projected ATS match percentage (0-100) after optimization.",
+                description:
+                  "New projected ATS match percentage (0-100) after optimization.",
               },
               scoreImprovement: {
                 type: Type.INTEGER,
@@ -274,11 +440,13 @@ Generate the optimized sections and audit report in valid JSON conforming to the
               },
               hiringManagerNote: {
                 type: Type.STRING,
-                description: "Hiring Manager perspective on why this optimized resume will pass recruiter screening and ATS parsing.",
+                description:
+                  "Hiring Manager perspective on why this optimized resume will pass recruiter screening and ATS parsing.",
               },
               truthfulnessAudit: {
                 type: Type.STRING,
-                description: "Formal statement verifying that all modifications adhere strictly to candidate-verified claims with zero hallucinations.",
+                description:
+                  "Formal statement verifying that all modifications adhere strictly to candidate-verified claims with zero hallucinations.",
               },
               optimizedSections: {
                 type: Type.OBJECT,
@@ -286,21 +454,53 @@ Generate the optimized sections and audit report in valid JSON conforming to the
                   careerSummary: {
                     type: Type.OBJECT,
                     properties: {
-                      text: { type: Type.STRING, description: "The revised 3-4 sentence ATS-optimized career summary." },
-                      changesMade: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Specific improvements made." },
-                      keywordsIncluded: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Job keywords woven in." },
+                      text: {
+                        type: Type.STRING,
+                        description:
+                          "The revised 3-4 sentence ATS-optimized career summary.",
+                      },
+                      changesMade: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING },
+                        description: "Specific improvements made.",
+                      },
+                      keywordsIncluded: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING },
+                        description: "Job keywords woven in.",
+                      },
                     },
                     required: ["text", "changesMade", "keywordsIncluded"],
                   },
                   coreCompetencies: {
                     type: Type.OBJECT,
                     properties: {
-                      items: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Array of distinct skill tags / competencies." },
-                      formattedText: { type: Type.STRING, description: "Clean bulleted / categorical text representation." },
-                      changesMade: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      keywordsIncluded: { type: Type.ARRAY, items: { type: Type.STRING } },
+                      items: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING },
+                        description:
+                          "Array of distinct skill tags / competencies.",
+                      },
+                      formattedText: {
+                        type: Type.STRING,
+                        description:
+                          "Clean bulleted / categorical text representation.",
+                      },
+                      changesMade: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING },
+                      },
+                      keywordsIncluded: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING },
+                      },
                     },
-                    required: ["items", "formattedText", "changesMade", "keywordsIncluded"],
+                    required: [
+                      "items",
+                      "formattedText",
+                      "changesMade",
+                      "keywordsIncluded",
+                    ],
                   },
                   handsOnProjects: {
                     type: Type.OBJECT,
@@ -312,14 +512,27 @@ Generate the optimized sections and audit report in valid JSON conforming to the
                           properties: {
                             title: { type: Type.STRING },
                             contextOrRole: { type: Type.STRING },
-                            bullets: { type: Type.ARRAY, items: { type: Type.STRING } },
-                            keywordsUsed: { type: Type.ARRAY, items: { type: Type.STRING } },
+                            bullets: {
+                              type: Type.ARRAY,
+                              items: { type: Type.STRING },
+                            },
+                            keywordsUsed: {
+                              type: Type.ARRAY,
+                              items: { type: Type.STRING },
+                            },
                           },
                           required: ["title", "bullets", "keywordsUsed"],
                         },
                       },
-                      formattedText: { type: Type.STRING, description: "Complete formatted text for the Hands-on Projects section." },
-                      changesMade: { type: Type.ARRAY, items: { type: Type.STRING } },
+                      formattedText: {
+                        type: Type.STRING,
+                        description:
+                          "Complete formatted text for the Hands-on Projects section.",
+                      },
+                      changesMade: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING },
+                      },
                     },
                     required: ["projects", "formattedText", "changesMade"],
                   },
@@ -334,19 +547,43 @@ Generate the optimized sections and audit report in valid JSON conforming to the
                             role: { type: Type.STRING },
                             company: { type: Type.STRING },
                             period: { type: Type.STRING },
-                            bullets: { type: Type.ARRAY, items: { type: Type.STRING } },
-                            keywordsUsed: { type: Type.ARRAY, items: { type: Type.STRING } },
+                            bullets: {
+                              type: Type.ARRAY,
+                              items: { type: Type.STRING },
+                            },
+                            keywordsUsed: {
+                              type: Type.ARRAY,
+                              items: { type: Type.STRING },
+                            },
                           },
-                          required: ["role", "company", "period", "bullets", "keywordsUsed"],
+                          required: [
+                            "role",
+                            "company",
+                            "period",
+                            "bullets",
+                            "keywordsUsed",
+                          ],
                         },
                       },
-                      formattedText: { type: Type.STRING, description: "Complete formatted text for the Professional Experience section." },
-                      changesMade: { type: Type.ARRAY, items: { type: Type.STRING } },
+                      formattedText: {
+                        type: Type.STRING,
+                        description:
+                          "Complete formatted text for the Professional Experience section.",
+                      },
+                      changesMade: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING },
+                      },
                     },
                     required: ["experiences", "formattedText", "changesMade"],
                   },
                 },
-                required: ["careerSummary", "coreCompetencies", "handsOnProjects", "professionalExperience"],
+                required: [
+                  "careerSummary",
+                  "coreCompetencies",
+                  "handsOnProjects",
+                  "professionalExperience",
+                ],
               },
               atsChecklist: {
                 type: Type.ARRAY,
@@ -354,26 +591,42 @@ Generate the optimized sections and audit report in valid JSON conforming to the
                   type: Type.OBJECT,
                   properties: {
                     keyword: { type: Type.STRING },
-                    status: { type: Type.STRING, description: "matched_original, added_from_interview, or omitted_truthfully" },
-                    locationFound: { type: Type.STRING, description: "Which section contains this keyword now" },
-                    note: { type: Type.STRING, description: "Brief contextual note" },
+                    status: {
+                      type: Type.STRING,
+                      description:
+                        "matched_original, added_from_interview, or omitted_truthfully",
+                    },
+                    locationFound: {
+                      type: Type.STRING,
+                      description: "Which section contains this keyword now",
+                    },
+                    note: {
+                      type: Type.STRING,
+                      description: "Brief contextual note",
+                    },
                   },
                   required: ["keyword", "status"],
                 },
               },
             },
-            required: ["projectedRating", "scoreImprovement", "hiringManagerNote", "truthfulnessAudit", "optimizedSections", "atsChecklist"],
+            required: [
+              "projectedRating",
+              "scoreImprovement",
+              "hiringManagerNote",
+              "truthfulnessAudit",
+              "optimizedSections",
+              "atsChecklist",
+            ],
           },
         },
       });
 
-      const rawJson = response.text || "{}";
-      const resultData = JSON.parse(rawJson);
+      const resultData = cleanAndParseJson(response.text || "{}");
       res.json(resultData);
     } catch (error: any) {
       console.error("Error in /api/generate-optimized-resume:", error);
       res.status(500).json({
-        error: error.message || "Failed to generate optimized resume.",
+        error: formatErrorMessage(error),
       });
     }
   });
@@ -381,7 +634,13 @@ Generate the optimized sections and audit report in valid JSON conforming to the
   // Fine-tuning or regenerating a single section
   app.post("/api/regenerate-single-section", async (req, res) => {
     try {
-      const { sectionKey, currentText, jobTitle, jobDescription, instructions } = req.body;
+      const {
+        sectionKey,
+        currentText,
+        jobTitle,
+        jobDescription,
+        instructions,
+      } = req.body;
 
       const ai = getGenAI();
       const prompt = `You are an expert Resume Modifier and Hiring Manager.
@@ -402,20 +661,19 @@ Provide a response formatted as JSON:
   "explanation": "..."
 }`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.7-flash",
+      const response = await generateContentWithRetryAndFallback(ai, {
         contents: prompt,
         config: {
           responseMimeType: "application/json",
         },
       });
 
-      const rawJson = response.text || "{}";
-      res.json(JSON.parse(rawJson));
+      const result = cleanAndParseJson(response.text || "{}");
+      res.json(result);
     } catch (error: any) {
       console.error("Error in /api/regenerate-single-section:", error);
       res.status(500).json({
-        error: error.message || "Failed to regenerate section.",
+        error: formatErrorMessage(error),
       });
     }
   });
@@ -443,3 +701,4 @@ Provide a response formatted as JSON:
 startServer().catch((err) => {
   console.error("Failed to start server:", err);
 });
+

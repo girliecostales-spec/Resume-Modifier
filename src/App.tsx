@@ -274,18 +274,40 @@ export default function App() {
       {/* Global Error Banner */}
       {errorMessage && (
         <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 pt-4">
-          <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 text-xs text-rose-800 flex items-center justify-between gap-3 shadow-sm">
+          <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 text-xs text-rose-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
             <div className="flex items-center gap-2.5">
               <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
               <span className="font-medium">{errorMessage}</span>
             </div>
-            <button
-              type="button"
-              onClick={() => setErrorMessage(null)}
-              className="text-xs text-rose-700 hover:text-rose-900 font-bold underline cursor-pointer"
-            >
-              Dismiss
-            </button>
+            <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
+              {currentStep === "input" && (
+                <button
+                  type="button"
+                  onClick={handleRunAnalysis}
+                  disabled={isLoading}
+                  className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg transition text-xs cursor-pointer disabled:opacity-50"
+                >
+                  Retry Analysis
+                </button>
+              )}
+              {currentStep === "interview" && (
+                <button
+                  type="button"
+                  onClick={() => handleGenerateOptimized("Results-Driven & ATS Direct")}
+                  disabled={isLoading}
+                  className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg transition text-xs cursor-pointer disabled:opacity-50"
+                >
+                  Retry Optimization
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setErrorMessage(null)}
+                className="text-xs text-rose-700 hover:text-rose-900 font-bold underline cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         </div>
       )}
