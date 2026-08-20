@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  --color-palette-blue: #30afff;
+  --color-palette-blue-dark: #1a88d6;
+  --color-palette-blue-deep: #0d5f99;
+  --color-palette-aqua: #92eeff;
+  --color-palette-aqua-light: #e8fbff;
+  --color-palette-lime: #d8ffc5;
+  --color-palette-lime-light: #f2ffed;
+  --color-palette-mint: #c4f7ca;
+  --color-palette-mint-dark: #1a7434;
+  --color-palette-mint-deep: #115725;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-800 antialiased font-sans min-h-screen selection:bg-[#92eeff] selection:text-slate-900;
+  }
+}
+

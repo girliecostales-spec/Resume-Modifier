@@ -1,0 +1,6 @@
+{
+  "name": "Resume Modifier",
+  "description": "Hiring-manager AI agent that analyzes job postings and resumes for ATS keyword matches, interviews candidates on unlisted skills and experiences, and generates truthfully optimized resume sections.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
